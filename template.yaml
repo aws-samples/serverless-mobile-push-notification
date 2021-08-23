@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  RegistrationFunction
+
+  A SAM Template for RegistrationFunction
+
+Globals:
+  Function:
+    Timeout: 3
+
+Parameters:
+  andriodplatform:
+    Type: String
+    Default: arn:aws:sns:ap-southeast-2:[account-id]:app/GCM/Andriod
+  iosplatform:
+    Type: String
+    Default: arn:aws:sns:ap-southeast-2:[account-id]:app/APNS_SANDBOX/iospushnotification
+
+Resources:
+  RegistrationRESTAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Name: RegistrationFunctionsapi
+  RegistrationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: sns_endpoint_lambda/
+      Handler: lambda.lambda_handler
+      Runtime: python3.8
+      Environment:
+        Variables:
+          ANDROID_SNS_PLATFORM: !Ref andriodplatform
+          IOS_SNS_PLATFORM: !Ref iosplatform
+          REGISTRATION_DDB_TABLE: !Ref RegistrationTable
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sns:CreatePlatformEndpoint
+                - sns:SetEndpointAttributes
+                - sns:GetEndpointAttributes
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt RegistrationTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                !Join
+                - '/'
+                - - !GetAtt RegistrationTable.Arn
+                  - "index"
+                  - 'endpoint-index'
+      Events:
+        HttpPost:
+          Type: Api
+          Properties:
+            Path: '/tokenregistration'
+            Method: post
+            RestApiId:
+              Ref: RegistrationRESTAPI
+
+  RegistrationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "username"
+          AttributeType: "S"
+        - AttributeName: "mobileOS"
+          AttributeType: "S"
+        - AttributeName: "endpoint"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "username"
+          KeyType: "HASH"
+        - AttributeName: "mobileOS"
+          KeyType: "RANGE"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+      TableName: "RegistrationFunctions"
+      GlobalSecondaryIndexes:
+        - IndexName: "endpoint-index"
+          KeySchema:
+            - AttributeName: "endpoint"
+              KeyType: "HASH"
+          Projection:
+            NonKeyAttributes:
+              - "mobileOS"
+              - "username"
+            ProjectionType: "INCLUDE"
+          ProvisionedThroughput:
+            ReadCapacityUnits: "5"
+            WriteCapacityUnits: "5"
+
+Outputs:
+  TokenRegistrationAPI:
+    Description: "API Gateway endpoint URL for token registration"
+    Value: !Sub "https://${RegistrationRESTAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/tokenregistration/"
